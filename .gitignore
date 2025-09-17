@@ -52,6 +52,7 @@ coverage.xml
 # Local data
 *.sqlite3
 *.db
+docs/
 
 # macOS metadata
 .DS_Store
