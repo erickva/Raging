@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "raging"
+version = "0.1.0"
+description = "Composable ingestion and retrieval helpers for small-scale RAG workflows."
+readme = "README.md"
+authors = [
+    {name = "Erick Vargas"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.9,<1.0",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+    "sqlalchemy>=2.0",
+    "pgvector>=0.2.4",
+    "psycopg[binary]>=3.1",
+    "requests>=2.31"
+]
+
+[project.optional-dependencies]
+ingest = [
+    "langchain-text-splitters>=0.0.240",
+    "llama-index-core>=0.10.0"
+]
+pdf = [
+    "llama-index-readers-file>=0.1.0",
+    "pypdf>=3.0.0"
+]
+docx = [
+    "python-docx>=0.8.11"
+]
+excel = [
+    "pandas>=2.1",
+    "openpyxl>=3.1"
+]
+faq = []
+
+[project.scripts]
+raging = "raging.cli.main:main"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
