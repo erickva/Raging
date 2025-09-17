@@ -46,6 +46,10 @@ class StorageConfig(BaseModel):
         default="default",
         description="Logical name for grouping documents inside the same database",
     )
+    collection_column: str = Field(
+        default="collection",
+        description="Column name used to store the logical collection/tenant identifier",
+    )
     embedding_dimension: Optional[int] = Field(
         default=None, description="Vector dimension; overrides embedding config when provided"
     )
@@ -154,6 +158,14 @@ class ProjectConfig(BaseModel):
         """Return explicit embedding dimension when configured."""
 
         return self.storage.embedding_dimension or self.embedding.dimension
+
+    @property
+    def collection_value(self) -> str:
+        return self.storage.collection
+
+    @property
+    def collection_column(self) -> str:
+        return self.storage.collection_column
 
 
 class ConfigError(RuntimeError):

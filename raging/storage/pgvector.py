@@ -44,6 +44,8 @@ class PgVectorStore(VectorStore):
     def __init__(self, config: ProjectConfig) -> None:
         super().__init__(config)
         dimension = config.embedding_dimension or 1536
+        self.collection_column = config.storage.collection_column
+        collection_col = Column(self.collection_column, String, nullable=False)
         self.metadata = MetaData(schema=config.storage.schema)
         self.engine: Engine = create_engine(
             config.storage.connection_url,
@@ -56,7 +58,7 @@ class PgVectorStore(VectorStore):
             self.metadata,
             Column("chunk_id", String, primary_key=True),
             Column("source_id", String, nullable=False),
-            Column("collection", String, nullable=False),
+            collection_col,
             Column("content", Text, nullable=False),
             Column("checksum", String, nullable=False),
             Column("metadata", JSON, nullable=False, default=dict),
@@ -74,7 +76,7 @@ class PgVectorStore(VectorStore):
             "ingestion_runs",
             self.metadata,
             Column("run_id", String, primary_key=True),
-            Column("collection", String, nullable=False),
+            Column(self.collection_column, String, nullable=False),
             Column("recorded_at", DateTime(timezone=True), nullable=False),
             Column("processed", Integer, nullable=False),
             Column("emitted", Integer, nullable=False),
@@ -86,6 +88,7 @@ class PgVectorStore(VectorStore):
             Column("run_id", String, nullable=False),
             Column("source_id", String, nullable=False),
             Column("path", Text, nullable=False),
+            Column(self.collection_column, String, nullable=True),
             Column("processed", Integer, nullable=False),
             Column("emitted", Integer, nullable=False),
             Column("skipped", Integer, nullable=False),
@@ -114,7 +117,7 @@ class PgVectorStore(VectorStore):
                 {
                     "chunk_id": chunk.chunk_id,
                     "source_id": chunk.source_id,
-                    "collection": collection,
+                    self.collection_column: collection,
                     "content": chunk.content,
                     "checksum": chunk.checksum,
                     "metadata": dict(chunk.metadata),
@@ -160,7 +163,7 @@ class PgVectorStore(VectorStore):
                 self.chunks.c.tags,
                 distance,
             )
-            .where(self.chunks.c.collection == self.config.storage.collection)
+            .where(self.chunks.c[self.collection_column] == self.config.storage.collection)
             .order_by(distance)
             .limit(top_k)
         )
@@ -186,7 +189,7 @@ class PgVectorStore(VectorStore):
 
     def fetch_existing_checksums(self) -> dict[str, str]:
         stmt = select(self.chunks.c.chunk_id, self.chunks.c.checksum).where(
-            self.chunks.c.collection == self.config.storage.collection
+            self.chunks.c[self.collection_column] == self.config.storage.collection
         )
         checksums: dict[str, str] = {}
         with self.engine.connect() as conn:
@@ -204,7 +207,7 @@ class PgVectorStore(VectorStore):
     ) -> None:
         run_row = {
             "run_id": run_id,
-            "collection": self.config.storage.collection,
+            self.collection_column: self.config.storage.collection,
             "recorded_at": recorded_at,
             "processed": totals.processed,
             "emitted": totals.emitted,
@@ -215,6 +218,7 @@ class PgVectorStore(VectorStore):
                 "run_id": run_id,
                 "source_id": document.source_id,
                 "path": str(document.path),
+                self.collection_column: self.config.storage.collection,
                 "processed": stats.processed,
                 "emitted": stats.emitted,
                 "skipped": stats.skipped,

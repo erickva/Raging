@@ -22,6 +22,7 @@
      connection_url: postgresql+psycopg://user:pass@host:5432/db
      schema: raging
      collection: default
+     collection_column: tenant_id  # optional override
    ingest:
      checksum_algorithm: sha256
      sources:
@@ -71,13 +72,13 @@
    base_cfg = load_config("raging.yaml")
 
   def ingest_for_tenant(tenant_id: str, api_key: str):
-       cfg = base_cfg.model_copy(
-           update={
-               "storage": {"collection": f"tenant_{tenant_id}"},
-               "embedding": {"api_key": api_key, "api_key_env": None},
-           }
-       )
-       if cfg.generation:
+   cfg = base_cfg.model_copy(
+       update={
+           "storage": {"collection": f"tenant_{tenant_id}"},
+           "embedding": {"api_key": api_key, "api_key_env": None},
+       }
+   )
+   if cfg.generation:
            cfg = cfg.model_copy(
                update={
                    "generation": cfg.generation.model_copy(

@@ -47,7 +47,10 @@ class IngestionPipeline:
                         SourceDocument(
                             source_id=to_source_id(path),
                             path=path,
-                            metadata={"collection": self.config.storage.collection, **source_cfg.metadata},
+                            metadata={
+                                self.config.collection_column: self.config.collection_value,
+                                **source_cfg.metadata,
+                            },
                             tags=tuple(source_cfg.tags),
                         )
                     )
@@ -59,7 +62,10 @@ class IngestionPipeline:
                     SourceDocument(
                         source_id=to_source_id(path),
                         path=path,
-                        metadata={"collection": self.config.storage.collection, **source_cfg.metadata},
+                        metadata={
+                            self.config.collection_column: self.config.collection_value,
+                            **source_cfg.metadata,
+                        },
                         tags=tuple(source_cfg.tags),
                     )
                 )
