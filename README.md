@@ -10,6 +10,7 @@ Raging is a composable toolkit that helps small teams stand up Retrieval Augment
 - **Optional reranking** – re-order results with lightweight heuristics or custom scorers.
 - **CLI ready** – run `raging ingest` and `raging query` commands from project configs.
 - **Checksum aware** – skip re-embedding unchanged chunks unless you explicitly force it, with metrics logged per run and per source.
+- **FAQ aware** – files containing "faq" in their name are parsed as Q/A pairs even when they’re PDFs or Word docs.
 - **Flexible reranking** – choose between keyword, BM25, or LLM-based reordering via the proxy you already run, supplying per-tenant API keys at runtime.
 - **Answer synthesis** – optionally call your chat model to produce a final response grounded in the retrieved chunks.
 

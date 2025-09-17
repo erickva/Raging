@@ -118,3 +118,38 @@ def test_pipeline_skips_existing_checksums(tmp_path: Path) -> None:
     assert pipeline.stats.emitted == 1
     doc_stats_list = list(pipeline.iter_document_stats())
     assert doc_stats_list[0][1].emitted == 1
+
+
+def test_pipeline_detects_faq_handler_for_pdf(monkeypatch, tmp_path: Path) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir()
+    pdf_path = docs_dir / "customer_faq.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    monkeypatch.setattr(
+        "raging.ingest.handlers._extract_pdf_text",
+        lambda path: "Q: What?\nA: Answer."  # noqa: E731
+    )
+
+    config = ProjectConfig(
+        embedding=EmbeddingConfig(model="test", base_url="https://proxy"),
+        storage=StorageConfig(
+            connection_url="postgresql+psycopg://user:pass@localhost/db",
+            schema="raging",
+            collection="default",
+        ),
+        ingest=IngestConfig(
+            sources=[
+                SourceConfig(
+                    path=docs_dir,
+                    include=["*.pdf"],
+                )
+            ]
+        ),
+        retrieval=RetrievalConfig(top_k=5),
+    )
+
+    pipeline = IngestionPipeline(config)
+    chunks = list(pipeline.run(force=True))
+    assert len(chunks) == 1
+    assert chunks[0].content.startswith("Q: What?")

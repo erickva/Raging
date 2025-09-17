@@ -5,14 +5,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 
-from ..config import ProjectConfig, load_config, resolve_config_path
+from ..config import ProjectConfig, SourceConfig, load_config, resolve_config_path
 from ..embeddings.base import EmbeddingClient
 from ..embeddings.proxy import OpenAIProxyEmbeddingClient
 from ..ingest.pipeline import IngestionPipeline
+from ..generation import ResponseGenerator
 from ..retrieval.base import NullReranker, Retriever
 from ..retrieval.rerankers import BM25Reranker, KeywordOverlapReranker, LLMReranker
 from ..storage.pgvector import PgVectorStore
@@ -48,11 +49,17 @@ def ingest(
         "--rerank-api-key",
         help="Override reranker LLM API key (llm strategy only)",
     ),
+    files: Optional[List[Path]] = typer.Option(
+        None,
+        "--file",
+        "-f",
+        help="Explicit file(s) to ingest instead of scanning configured folders",
+    ),
 ) -> None:
     """Ingest documents configured in raging.yaml."""
 
     cfg = _load_config(config)
-    pipeline = IngestionPipeline(cfg)
+    pipeline = IngestionPipeline(_override_sources_with_files(cfg, files))
     store = PgVectorStore(cfg)
     embeddings = _build_embedding(cfg, api_key=embedding_api_key)
 
@@ -107,13 +114,31 @@ def query(
         "--rerank-api-key",
         help="Override reranker LLM API key (llm strategy only)",
     ),
+    generate: bool = typer.Option(
+        False,
+        "--generate",
+        help="Also return an LLM-crafted answer using retrieved chunks",
+    ),
+    generation_api_key: Optional[str] = typer.Option(
+        None,
+        "--generation-api-key",
+        help="Override generation LLM API key",
+    ),
+    files: Optional[List[Path]] = typer.Option(
+        None,
+        "--file",
+        "-f",
+        help="Explicit file(s) to ingest on-the-fly before querying",
+    ),
 ) -> None:
     """Run an ad-hoc query against the vector store."""
 
     cfg = _load_config(config)
     store = PgVectorStore(cfg)
+    cfg = _override_sources_with_files(cfg, files)
     embeddings = _build_embedding(cfg, api_key=embedding_api_key)
     reranker, rerank_top_n = _build_reranker(cfg, llm_api_key=rerank_api_key)
+    generator = _build_generator(cfg, generation_api_key) if generate else None
     retriever = Retriever(
         store=store,
         embeddings=embeddings,
@@ -124,31 +149,90 @@ def query(
     )
 
     results = retriever.query(question)
+    context_chunks = _select_context(results, rerank_top_n)
+
     if json_output:
         import json
 
-        typer.echo(
-            json.dumps(
-                [
-                    {
-                        "chunk_id": record.chunk_id,
-                        "source_id": record.source_id,
-                        "score": record.score,
-                        "metadata": dict(record.metadata),
-                        "tags": list(record.tags),
-                        "content": record.content,
-                    }
-                    for record in results
-                ],
-                indent=2,
-            )
-        )
+        payload = {
+            "results": [
+                {
+                    "chunk_id": record.chunk_id,
+                    "source_id": record.source_id,
+                    "score": record.score,
+                    "metadata": dict(record.metadata),
+                    "tags": list(record.tags),
+                    "content": record.content,
+                }
+                for record in results
+            ]
+        }
+        if generator:
+            answer = generator.generate(question, context_chunks)
+            payload["answer"] = answer
+        typer.echo(json.dumps(payload, indent=2))
         return
+
+    if generator:
+        answer = generator.generate(question, context_chunks)
+        typer.secho("Answer:", fg="cyan")
+        typer.echo(answer)
+        typer.echo("")
 
     for idx, record in enumerate(results, start=1):
         typer.echo(f"[{idx}] score={record.score:.4f} source={record.source_id}")
         typer.echo(record.content)
         typer.echo("-")
+
+
+@app.command()
+def answer(
+    question: str = typer.Argument(..., help="Question or search query"),
+    config: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config file"),
+    embedding_api_key: Optional[str] = typer.Option(
+        None,
+        "--embedding-api-key",
+        help="Override embedding provider API key for this query",
+    ),
+    rerank_api_key: Optional[str] = typer.Option(
+        None,
+        "--rerank-api-key",
+        help="Override reranker LLM API key (llm strategy only)",
+    ),
+    generation_api_key: Optional[str] = typer.Option(
+        None,
+        "--generation-api-key",
+        help="Override generation LLM API key",
+    ),
+    files: Optional[List[Path]] = typer.Option(
+        None,
+        "--file",
+        "-f",
+        help="Explicit file(s) to ingest on-the-fly before answering",
+    ),
+) -> None:
+    """Return only the generated answer (no chunk listing)."""
+
+    cfg = _load_config(config)
+    generator = _build_generator(cfg, generation_api_key)
+    cfg = _override_sources_with_files(cfg, files)
+    store = PgVectorStore(cfg)
+    embeddings = _build_embedding(cfg, api_key=embedding_api_key)
+    reranker, rerank_top_n = _build_reranker(cfg, llm_api_key=rerank_api_key)
+
+    retriever = Retriever(
+        store=store,
+        embeddings=embeddings,
+        reranker=reranker,
+        top_k=cfg.retrieval.top_k,
+        score_threshold=cfg.retrieval.score_threshold,
+        rerank_top_n=rerank_top_n,
+    )
+
+    results = retriever.query(question)
+    context_chunks = _select_context(results, rerank_top_n)
+    answer_text = generator.generate(question, context_chunks)
+    typer.echo(answer_text)
 
 
 @app.command()
@@ -218,6 +302,40 @@ def _build_reranker(config: ProjectConfig, llm_api_key: Optional[str] = None):
     if strategy == "custom":
         raise ValueError("Custom reranker strategy requires project-defined implementation")
     return KeywordOverlapReranker(), top_n_value
+
+
+def _build_generator(config: ProjectConfig, api_key: Optional[str]) -> ResponseGenerator:
+    if not config.generation:
+        raise typer.BadParameter(
+            "Generation config missing. Add a `generation` section to raging.yaml or remove --generate/answer command."
+        )
+    gen_config = config.generation
+    if api_key:
+        gen_config = gen_config.model_copy(update={"api_key": api_key, "api_key_env": None})
+    return ResponseGenerator(gen_config)
+
+
+def _select_context(results: List, rerank_top_n: Optional[int]):
+    if not results:
+        return []
+    if rerank_top_n:
+        return results[:rerank_top_n]
+    return results
+
+
+def _override_sources_with_files(config: ProjectConfig, files: Optional[List[Path]]) -> ProjectConfig:
+    if not files:
+        return config
+    from ..config import SourceConfig
+
+    file_source = SourceConfig(
+        path=None,
+        handler=None,
+        include=["**/*"],
+        files=[path.expanduser().resolve() for path in files],
+    )
+    ingest = config.ingest.model_copy(update={"sources": [file_source, *config.ingest.sources]})
+    return config.model_copy(update={"ingest": ingest})
 
 
 def main() -> None:

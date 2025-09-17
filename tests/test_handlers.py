@@ -94,7 +94,9 @@ def test_pdf_handler_uses_pypdf_fallback(monkeypatch, tmp_path: Path) -> None:
     path = tmp_path / "sample.pdf"
     path.write_text("dummy", encoding="utf-8")
     handler = PdfHandler()
-    text = handler._extract_pdf_text(path)
+    from raging.ingest.handlers import _extract_pdf_text
+
+    text = _extract_pdf_text(path)
     assert text == "Hello\n\nHello"
 
 
@@ -115,7 +117,9 @@ def test_docx_handler_extracts_paragraphs(monkeypatch, tmp_path: Path) -> None:
     path = tmp_path / "sample.docx"
     path.write_text("", encoding="utf-8")
     handler = DocxHandler()
-    text = handler._extract_docx_text(path)
+    from raging.ingest.handlers import _extract_docx_text
+
+    text = _extract_docx_text(path)
     assert text == "Para 1\n\nPara 2"
 
 

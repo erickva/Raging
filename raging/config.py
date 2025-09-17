@@ -59,7 +59,9 @@ class StorageConfig(BaseModel):
 class SourceConfig(BaseModel):
     """Configuration describing a single ingestion source."""
 
-    path: Path = Field(..., description="Base path or identifier for the source")
+    path: Optional[Path] = Field(
+        default=None, description="Base path for the source; optional when specifying explicit files"
+    )
     handler: Optional[str] = Field(
         default=None,
         description="Explicit handler name; falls back to registry pattern matching when omitted",
@@ -75,11 +77,20 @@ class SourceConfig(BaseModel):
     recursive: bool = Field(default=True, description="Recurse into subdirectories when scanning")
     tags: List[str] = Field(default_factory=list, description="Extra metadata tags for chunks")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Static metadata to attach")
+    files: List[Path] = Field(
+        default_factory=list,
+        description="Explicit list of files to ingest (bypasses globbing when provided)",
+    )
 
     @field_validator("path")
     @classmethod
-    def _expand_path(cls, value: Path) -> Path:
-        return value.expanduser().resolve()
+    def _expand_path(cls, value: Path | None) -> Path | None:
+        return value.expanduser().resolve() if value else None
+
+    @field_validator("files")
+    @classmethod
+    def _expand_files(cls, values: List[Path]) -> List[Path]:
+        return [value.expanduser().resolve() for value in values]
 
 
 class IngestConfig(BaseModel):
@@ -112,6 +123,22 @@ class RerankConfig(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
+class GenerationConfig(BaseModel):
+    """Configuration for answer synthesis with an LLM."""
+
+    provider: Literal["openai-proxy"] = "openai-proxy"
+    base_url: str = Field(..., description="Base URL for chat/completions endpoint")
+    model: str = Field(..., description="LLM model name to generate answers")
+    api_key_env: Optional[str] = Field(
+        default=None, description="Environment variable with API key"
+    )
+    api_key: Optional[str] = Field(default=None, description="Inline API key value")
+    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_tokens: Optional[int] = Field(default=512, ge=1)
+    timeout: int = Field(default=30, description="HTTP timeout in seconds")
+    max_retries: int = Field(default=3, ge=0, description="Retries on rate limit")
+
+
 class ProjectConfig(BaseModel):
     """Top-level configuration wrapper."""
 
@@ -120,6 +147,7 @@ class ProjectConfig(BaseModel):
     ingest: IngestConfig = Field(default_factory=IngestConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     rerank: RerankConfig = Field(default_factory=RerankConfig)
+    generation: Optional[GenerationConfig] = Field(default=None)
 
     @property
     def embedding_dimension(self) -> Optional[int]:

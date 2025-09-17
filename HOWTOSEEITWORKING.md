@@ -48,10 +48,20 @@
 
 6. **Query**:
    ```bash
-   raging query --config raging.yaml "How do I deploy the service?" --rerank-api-key tenant-rerank-token
+   raging query --config raging.yaml "How do I deploy the service?" \
+     --rerank-api-key tenant-rerank-token \
+     --generation-api-key tenant-answer-token \
+     --generate
    ```
 
-7. **Programmatic multi-tenant example**:
+7. **Answer-only CLI**:
+   ```bash
+   raging answer "How do I deploy the service?" \
+     --rerank-api-key tenant-rerank-token \
+     --generation-api-key tenant-answer-token
+   ```
+
+8. **Programmatic multi-tenant example**:
    ```python
    from raging.config import load_config
    from raging.ingest.pipeline import IngestionPipeline
@@ -60,13 +70,21 @@
 
    base_cfg = load_config("raging.yaml")
 
-   def ingest_for_tenant(tenant_id: str, api_key: str):
+  def ingest_for_tenant(tenant_id: str, api_key: str):
        cfg = base_cfg.model_copy(
            update={
                "storage": {"collection": f"tenant_{tenant_id}"},
                "embedding": {"api_key": api_key, "api_key_env": None},
            }
        )
+       if cfg.generation:
+           cfg = cfg.model_copy(
+               update={
+                   "generation": cfg.generation.model_copy(
+                       update={"api_key": api_key, "api_key_env": None}
+                   )
+               }
+           )
        pipeline = IngestionPipeline(cfg)
        store = PgVectorStore(cfg)
        embeddings = OpenAIProxyEmbeddingClient(cfg.embedding)

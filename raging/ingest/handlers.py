@@ -15,9 +15,53 @@ from .base import (
 )
 from .registry import get_registry
 
-
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _extract_pdf_text(path: Path) -> str:
+    try:
+        from llama_index.readers.file import PDFReader  # type: ignore
+    except ImportError:
+        PDFReader = None
+
+    if PDFReader is not None:
+        reader = PDFReader()
+        documents = reader.load_data(file=path)
+        return "\n\n".join(doc.text for doc in documents if getattr(doc, "text", "")).strip()
+
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "PDF ingestion requires llama-index-readers-file or pypdf; install raging[pdf]."
+        ) from exc
+
+    pdf_reader = PdfReader(str(path))
+    pages = [page.extract_text() or "" for page in pdf_reader.pages]
+    return "\n\n".join(pages).strip()
+
+
+def _extract_docx_text(path: Path) -> str:
+    try:
+        import docx  # type: ignore
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError("DOCX ingestion requires python-docx; install raging[docx].") from exc
+
+    document = docx.Document(str(path))
+    paragraphs = [para.text for para in document.paragraphs if para.text.strip()]
+    return "\n\n".join(paragraphs).strip()
+
+
+def _load_faq_text(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".txt", ".md", ".markdown"}:
+        return _read_text(path)
+    if suffix == ".docx":
+        return _extract_docx_text(path)
+    if suffix == ".pdf":
+        return _extract_pdf_text(path)
+    return _read_text(path)
 
 
 class TextHandler(IngestionHandler):
@@ -126,6 +170,12 @@ class FAQHandler(TextHandler):
             chunks.append("\n".join(buffer).strip())
         return chunks
 
+    def iter_chunks(self, document: SourceDocument, checksum_algorithm: str):
+        text = _load_faq_text(document.path)
+        if not text:
+            return
+        yield from self._emit_chunks(text, document, checksum_algorithm)
+
 
 class PlaceholderHandler(IngestionHandler):
     """Placeholder for handlers that need future implementation."""
@@ -146,32 +196,10 @@ class PdfHandler(TextHandler):
     name = "pdf"
 
     def iter_chunks(self, document: SourceDocument, checksum_algorithm: str):
-        text = self._extract_pdf_text(document.path)
+        text = _extract_pdf_text(document.path)
         if not text:
             return
         yield from self._emit_chunks(text, document, checksum_algorithm)
-
-    def _extract_pdf_text(self, path: Path) -> str:
-        try:
-            from llama_index.readers.file import PDFReader  # type: ignore
-        except ImportError:
-            PDFReader = None
-
-        if PDFReader is not None:
-            reader = PDFReader()
-            documents = reader.load_data(file=path)
-            return "\n\n".join(doc.text for doc in documents if getattr(doc, "text", "")).strip()
-
-        try:
-            from pypdf import PdfReader  # type: ignore
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "PDF ingestion requires llama-index-readers-file or pypdf; install raging[pdf]."
-            ) from exc
-
-        pdf_reader = PdfReader(str(path))
-        pages = [page.extract_text() or "" for page in pdf_reader.pages]
-        return "\n\n".join(pages).strip()
 
 
 class ExcelHandler(TextHandler):
@@ -211,20 +239,10 @@ class DocxHandler(TextHandler):
     name = "docx"
 
     def iter_chunks(self, document: SourceDocument, checksum_algorithm: str):
-        text = self._extract_docx_text(document.path)
+        text = _extract_docx_text(document.path)
         if not text:
             return
         yield from self._emit_chunks(text, document, checksum_algorithm)
-
-    def _extract_docx_text(self, path: Path) -> str:
-        try:
-            import docx  # type: ignore
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("DOCX ingestion requires python-docx; install raging[docx].") from exc
-
-        document = docx.Document(str(path))
-        paragraphs = [para.text for para in document.paragraphs if para.text.strip()]
-        return "\n\n".join(paragraphs).strip()
 
 
 DEFAULT_HANDLER_PATTERNS = {

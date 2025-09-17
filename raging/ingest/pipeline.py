@@ -40,12 +40,26 @@ class IngestionPipeline:
 
         documents: List[SourceDocument] = []
         for source_cfg in self.config.ingest.sources:
+            explicit_files = source_cfg.files
+            if explicit_files:
+                for path in explicit_files:
+                    documents.append(
+                        SourceDocument(
+                            source_id=to_source_id(path),
+                            path=path,
+                            metadata={"collection": self.config.storage.collection, **source_cfg.metadata},
+                            tags=tuple(source_cfg.tags),
+                        )
+                    )
+                continue
+            if not source_cfg.path:
+                continue
             for path in self._enumerate_paths(source_cfg):
                 documents.append(
                     SourceDocument(
                         source_id=to_source_id(path),
                         path=path,
-                        metadata={"collection": self.config.storage.collection},
+                        metadata={"collection": self.config.storage.collection, **source_cfg.metadata},
                         tags=tuple(source_cfg.tags),
                     )
                 )
@@ -106,6 +120,12 @@ class IngestionPipeline:
         return filtered
 
     def _resolve_handler(self, path: Path):
+        if "faq" in path.stem.lower():
+            try:
+                handler_cls = self.registry.get("faq")
+                return handler_cls()
+            except KeyError:
+                pass
         matches = self.registry.match(path)
         if matches:
             handler_name = matches[0]

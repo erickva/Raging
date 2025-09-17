@@ -23,6 +23,10 @@ retrieval:
   top_k: 4
 rerank:
   strategy: none
+generation:
+  provider: openai-proxy
+  base_url: https://proxy.local/v1
+  model: saga-chat
 """,
         encoding="utf-8",
     )
@@ -31,6 +35,7 @@ rerank:
     assert config.embedding.model == "text-embedding-3-small"
     assert config.storage.schema == "raging"
     assert config.retrieval.top_k == 4
+    assert config.generation is not None
 
 
 def test_load_config_missing_file(tmp_path: Path) -> None:
