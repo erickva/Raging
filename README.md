@@ -106,6 +106,13 @@ rerank:
 
 Only the top `top_n` hits are reranked; the remainder keep the original vector order.
 
+## Multi-Tenant Usage
+
+- Treat `raging.yaml` as a template. In code, load it once (`load_config`) and `model_copy` it per tenant to override `storage.collection`, `embedding.api_key`, etc.
+- Collections are just string labels stored with each chunk; every ingest/query filters on that value. Use `collection = f"tenant_{tenant_id}"` to isolate tenants inside the same tables.
+- If you prefer CLI-only workflows, generate a temporary config per tenant or add `--collection` and API key flags when invoking the commands.
+- Schema separation (`storage.schema`) is orthogonal: set it if you want Raging tables in their own Postgres schema, but you can still join across schemas as needed.
+
 ## Philosophy
 
 Raging favors clarity over magic: components are plain Python classes with explicit interfaces. Adding new ingestion sources or rerankers means subclassing the relevant base class and registering it with the dispatcher. The CLI is a convenience layer that uses the same building blocks to keep parity between automation and development workflows.
