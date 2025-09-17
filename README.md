@@ -11,6 +11,7 @@ Raging is a composable toolkit that helps small teams stand up Retrieval Augment
 - **CLI ready** – run `raging ingest` and `raging query` commands from project configs.
 - **Checksum aware** – skip re-embedding unchanged chunks unless you explicitly force it, with metrics logged per run and per source.
 - **Flexible reranking** – choose between keyword, BM25, or LLM-based reordering via the proxy you already run, supplying per-tenant API keys at runtime.
+- **Answer synthesis** – optionally call your chat model to produce a final response grounded in the retrieved chunks.
 
 ## Package Layout
 
@@ -83,11 +84,20 @@ raging/
    raging ingest --config raging.yaml --embedding-api-key tenant-token --rerank-api-key tenant-rerank
    ```
 
+   Uploading a single file? Pass it directly with `--file` (repeatable):
+
+   ```bash
+   raging ingest --config raging.yaml --file /tmp/uploads/new.pdf --embedding-api-key tenant-token
+   ```
+
 5. Run an ad-hoc query:
 
    ```bash
-   raging query --config raging.yaml "How do I deploy the service?"
+   raging query --config raging.yaml "How do I deploy the service?" --generate --generation-api-key tenant-gen
    ```
+
+   Use `--generate` to include an LLM-crafted answer alongside the chunks, or call `raging answer "question"` to emit just the answer.
+   You can also append `--file path/to/new.docx` to ingest a fresh file right before querying.
 
 ## Reranking Options
 
@@ -112,6 +122,27 @@ Only the top `top_n` hits are reranked; the remainder keep the original vector o
 - Collections are just string labels stored with each chunk; every ingest/query filters on that value. Use `collection = f"tenant_{tenant_id}"` to isolate tenants inside the same tables.
 - If you prefer CLI-only workflows, generate a temporary config per tenant or add `--collection` and API key flags when invoking the commands.
 - Schema separation (`storage.schema`) is orthogonal: set it if you want Raging tables in their own Postgres schema, but you can still join across schemas as needed.
+
+## Answer Generation
+
+- Configure a `generation` section with the model/base URL used for final responses. It can share the proxy but use a different model than embeddings.
+- CLI flags `--generate` (on `query`) or the `raging answer` subcommand call the generator. Provide `--generation-api-key` if the model needs a separate credential.
+- Prompts include only retrieved chunks and instruct the LLM to stay within that context; if the context is empty, the generator returns a fallback message.
+
+## Ad-hoc File Ingestion
+
+- Add explicit file lists in configuration when you don’t want to rely on globbing:
+
+  ```yaml
+  ingest:
+    sources:
+      - files:
+          - /tmp/uploads/tenant_a/guide.pdf
+          - /tmp/uploads/tenant_a/faq.md
+        tags: [tenant-a]
+  ```
+
+- Every CLI command (`ingest`, `query`, `answer`) accepts `--file/-f` so you can ingest newly uploaded documents on the fly without editing the YAML. The files are processed in addition to whatever sources are already defined.
 
 ## Philosophy
 
